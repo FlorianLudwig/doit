@@ -89,7 +89,7 @@ class Task(object):
                  is_subtask=False, has_subtask=False,
                  doc=None, params=(), pos_arg=None,
                  verbosity=None, title=None, getargs=None,
-                 watch=()):
+                 watch=(), loader=None):
         """sanity checks and initialization
 
         @param params: (list of dict for parameters) see cmdparse.CmdOption
@@ -132,6 +132,11 @@ class Task(object):
             self._actions = list(actions[:])
 
         self._init_deps(file_dep, task_dep, calc_dep)
+
+        # loaders create an implicity task_dep
+        self.loader = loader
+        if self.loader:
+            self.task_dep.append(loader[1])
 
         uptodate = uptodate if uptodate else []
 

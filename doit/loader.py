@@ -33,6 +33,13 @@ def flat_generator(gen, gen_doc=''):
             yield item, gen_doc
 
 
+def create_after(loaded=None, executed=None):
+    def decorated(func):
+        func.doit_create_after = {'loaded': loaded, 'executed':executed}
+        return func
+    return decorated
+
+
 def get_module(dodo_file, cwd=None, seek_parent=False):
     """
     The python file defining tasks is called "dodo" file.
@@ -149,7 +156,14 @@ def load_tasks(task_creators, command_names=()):
 
     task_list = []
     for name, ref, line in funcs:
-        task_list.extend(generate_tasks(name, ref(), ref.__doc__))
+        after = None
+        if hasattr(ref, 'doit_create_after'):
+            after = ref.doit_create_after.get('executed')
+
+        if after:
+            task_list.append(Task(name, None, loader=(ref, after)))
+        else:
+            task_list.extend(generate_tasks(name, ref(), ref.__doc__))
     return task_list
 
 

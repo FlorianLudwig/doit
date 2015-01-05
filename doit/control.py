@@ -5,7 +5,7 @@ import six
 
 from .exceptions import InvalidTask, InvalidCommand, InvalidDodoFile
 from .task import Task
-
+from .loader import generate_tasks
 
 
 class TaskControl(object):
@@ -370,6 +370,17 @@ class TaskDispatcher(object):
                 yield 'wait'
             else:
                 break
+
+        if this_task.loader:
+            ref = this_task.loader[0]
+            new_tasks = generate_tasks(this_task.name, ref(), ref.__doc__)
+            del self.nodes[this_task.name]
+            for nt in new_tasks:
+                self.tasks[nt.name] = nt
+                yield self._gen_node(node, nt.name)
+            # this task was placeholder to execute the loader
+            # now it needs to be re-processed with the real task
+            return
 
         # add itself
         yield this_task

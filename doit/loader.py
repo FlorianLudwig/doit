@@ -42,7 +42,7 @@ def create_after(loaded=None, executed=None):
 
 def get_module(dodo_file, cwd=None, seek_parent=False):
     """
-    The python file defining tasks is called "dodo" file.
+    Find python module defining tasks, it is called "dodo" file.
 
     @param dodo_file(str): path to file containing the tasks
     @param cwd(str): path to be used cwd, if None use path from dodo_file
@@ -102,21 +102,53 @@ def get_module(dodo_file, cwd=None, seek_parent=False):
     return __import__(os.path.splitext(file_name)[0])
 
 
-def load_tasks(task_creators, command_names=()):
-    """Get task generators and generate tasks
+def load_tasks(namespace, command_names=(), allow_delayed=False):
+    """Find task-creators and create tasks
 
-    @param task_creators: (dict) containing the task creators, it might
+    @param namespace: (dict) containing the task creators, it might
                         contain other stuff
     @param command_names: (list - str) blacklist for task names
+    @param load_all: (bool) if True ignore doit_crate_after['executed']
+
+    `load_all == False` is used by the runner to delay the creation of
+    tasks until a dependent task is executed. This is only used by the `run`
+    command, other commands should always load all tasks since it wont execute
+    any task.
+
     @return task_list (list) of Tasks in the order they were defined on the file
     """
+    funcs = _get_task_creators(namespace, command_names)
+    # sort by the order functions were defined (line number)
+    # TODO: this ordering doesnt make sense when generators come
+    # from different modules
+    funcs.sort(key=lambda obj:obj[2])
 
-    # get functions defined in the module and select the task generators
-    # a task generator function name starts with the string TASK_STRING
+    task_list = []
+    for name, ref, line in funcs:
+        dep_task = (allow_delayed and
+                    hasattr(ref, 'doit_create_after') and
+                    ref.doit_create_after.get('executed'))
+
+        if dep_task:
+            task_list.append(Task(name, None, loader=(ref, dep_task)))
+        else:
+            task_list.extend(generate_tasks(name, ref(), ref.__doc__))
+    return task_list
+
+
+def _get_task_creators(namespace, command_names):
+    """get functions defined in the `namespace` and select the task-creators
+
+    A task-creator is a function that:
+       - name starts with the string TASK_STRING
+       - has the attribute `create_doit_tasks`
+
+    @return (list - func) task-creators
+    """
     funcs = []
     prefix_len = len(TASK_STRING)
-    # get all functions that are task_creators
-    for name, ref in six.iteritems(task_creators):
+    # get all functions that are task-creators
+    for name, ref in six.iteritems(namespace):
 
         # function is a task creator because of its name
         if ((inspect.isfunction(ref) or inspect.ismethod(ref)) and
@@ -139,7 +171,7 @@ def load_tasks(task_creators, command_names=()):
         elif True: # coverage can't get "else: continue"
             continue
 
-        # tasks cant have name of commands
+        # tasks can't have the same name of a commands
         if task_name in command_names:
             msg = ("Task can't be called '%s' because this is a command name."+
                    " Please choose another name.")
@@ -149,22 +181,7 @@ def load_tasks(task_creators, command_names=()):
         # add to list task generator functions
         funcs.append((task_name, ref, line))
 
-    # sort by the order functions were defined (line number)
-    # TODO: this ordering doesnt make sense when generators come
-    # from different modules
-    funcs.sort(key=lambda obj:obj[2])
-
-    task_list = []
-    for name, ref, line in funcs:
-        after = None
-        if hasattr(ref, 'doit_create_after'):
-            after = ref.doit_create_after.get('executed')
-
-        if after:
-            task_list.append(Task(name, None, loader=(ref, after)))
-        else:
-            task_list.extend(generate_tasks(name, ref(), ref.__doc__))
-    return task_list
+    return funcs
 
 
 def load_doit_config(dodo_module):
@@ -259,7 +276,7 @@ def generate_tasks(func_name, gen_result, gen_doc=None):
     @param gen_result: value returned by a task generator function
                        it can be a dict or generator (generating dicts)
     @param gen_doc: (string/None) docstring from the task generator function
-    @return: (tuple) task, list of subtasks
+    @return: (list - Task)
     """
     # task described as a dictionary
     if isinstance(gen_result, dict):
